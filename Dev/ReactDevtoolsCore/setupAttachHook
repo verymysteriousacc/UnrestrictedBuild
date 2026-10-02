@@ -1,0 +1,14 @@
+local Packages = script.Parent.Parent
+local ReactGlobals = require(Packages.ReactGlobals)
+local ReactDevtoolsShared = require(Packages.ReactDevtoolsShared)
+
+local attach
+ReactGlobals.__REACT_DEVTOOLS_ATTACH__ = function(...)
+	if attach == nil then
+		attach = ReactDevtoolsShared.backend.getRendererLazy().attach
+	end
+
+	return attach(...)
+end
+
+return nil

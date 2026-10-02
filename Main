@@ -8,7 +8,16 @@ local d = Instance.new("Folder")
 d.Name = "Dev"
 d.Parent = f
 
+local rdc = Instance.new("Folder")
+rdc.Name = "ReactDevtoolsCore"
+rdc.Parent = d
+
 local rdcbr = Instance.new("ModuleScript")
 rdcbr.Name = "backend"
-rdcbr.Parent = d
+rdcbr.Parent = rdc
 rdcbr.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/backend")
+
+local rdcb = Instance.new("ModuleScript")
+rdcb.Name = "backend"
+rdcb.Parent = rdc
+rdcb.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/backendmain")

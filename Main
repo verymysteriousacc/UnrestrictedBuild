@@ -1,1 +1,14 @@
-nothing here!
+local cp = game:GetService("CorePackages")
+
+local f = Instance.new("Folder")
+f.Name = "Build@TEST1"
+f.Parent = cp
+
+local d = Instance.new("Folder")
+d.Name = "Dev"
+d.Parent = f
+
+local rdcbr = Instance.new("ModuleScript")
+rdcbr.Name = "backend"
+rdcbr.Parent = d
+rdcbr.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/backend")

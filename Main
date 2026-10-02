@@ -21,3 +21,8 @@ local rdcb = Instance.new("ModuleScript")
 rdcb.Name = "backend"
 rdcb.Parent = rdc
 rdcb.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/backendmain")
+
+local rdch = Instance.new("ModuleScript")
+rdch.Name = "setupAttachHook"
+rdcb.Parent = rdc
+rdcb.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/setupAttachHook")

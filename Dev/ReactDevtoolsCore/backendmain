@@ -1,0 +1,268 @@
+local HttpService = game:GetService("HttpService")
+
+local Packages = script.Parent.Parent.Parent
+local ReactGlobals = require(Packages.ReactGlobals)
+local ReactDevtoolsShared = require(Packages.ReactDevtoolsShared)
+local ReactTelemetry = require(Packages.ReactTelemetry)
+local LuauPolyfill = require(Packages.LuauPolyfill)
+local SafeFlags = require(Packages.SafeFlags)
+
+local Object = LuauPolyfill.Object
+
+local Agent = ReactDevtoolsShared.backend.agent
+local Bridge = ReactDevtoolsShared.bridge
+local installHook = ReactDevtoolsShared.hook.installHook
+local initBackend = ReactDevtoolsShared.backend.initBackend
+local __DEBUG__ = ReactDevtoolsShared.constants.__DEBUG__
+local getDefaultComponentFilters = ReactDevtoolsShared.utils.getDefaultComponentFilters
+
+type BackendBridge = ReactDevtoolsShared.BackendBridge
+type ComponentFilter = ReactDevtoolsShared.ComponentFilter
+type DevtoolsHook = ReactDevtoolsShared.DevtoolsHook
+
+local serializeTable = require(script.Parent.utils.serializeTable)
+
+local FFlagReactDevtoolsUseHttpWebStream =
+	SafeFlags.createGetFFlag("ReactDevtoolsUseHttpWebStream")()
+
+require(script.Parent.setupAttachHook)
+
+type Array<T> = { T }
+
+export type ConnectOptions = {
+	host: string?,
+	port: number?,
+	useHttps: boolean?,
+	isAppActive: (() -> boolean)?,
+	profileOnStart: boolean?,
+}
+
+local hook = installHook(ReactGlobals)
+local savedComponentFilters: Array<ComponentFilter> = getDefaultComponentFilters()
+
+local function debugPrint(methodName: string, ...: any)
+	if __DEBUG__ then
+		print(`[core/backend] {methodName}`, ...)
+	end
+end
+
+local function connectToDevtools(options_: ConnectOptions?)
+	if hook == nil then
+		return
+	end
+
+	local options: ConnectOptions = options_ or {}
+	local host = options.host or "localhost"
+	local useHttps = if options.useHttps == nil then false else options.useHttps
+	local port = options.port or 8097
+	local isAppActive = options.isAppActive or function()
+		return true
+	end
+
+	local protocol = if useHttps then "wss" else "ws"
+	local retryTimeoutThread: thread? = nil
+
+	local function scheduleRetry()
+		if retryTimeoutThread == nil then
+			retryTimeoutThread = task.delay(2, function()
+				connectToDevtools(options)
+			end)
+		end
+	end
+
+	if not isAppActive() then
+		scheduleRetry()
+		return
+	end
+
+	local bridge: BackendBridge? = nil
+	local agent
+
+	local messageListeners = {}
+	local uri = `{protocol}://{host}:{port}`
+
+	local function handleClose()
+		debugPrint("Socket.on('close')")
+
+		if bridge ~= nil then
+			bridge:shutdown()
+		end
+
+		ReactTelemetry.reportFailedDevtoolsConnection("socket_closed")
+		scheduleRetry()
+	end
+
+	local function handleMessage(event: any)
+		local success, data = pcall(function()
+			if type(event) == "string" then
+				local data = HttpService:JSONDecode(event)
+				debugPrint("Socket.on('message')", data)
+				return data
+			else
+				error(`Bad data received from socket: {event} (of type {typeof(event)})`)
+			end
+		end)
+
+		if not success then
+			error(
+				`[React DevTools] Failed to parse JSON: {event.data} (got error: {data})`
+			)
+		end
+
+		for _, fn in messageListeners do
+			local success, result = pcall(fn :: any, data)
+			if not success then
+				error(
+					`[React DevTools] Error calling listener with data: {data}\n{result}`
+				)
+			end
+		end
+	end
+
+	local success, socket = pcall(function()
+		if FFlagReactDevtoolsUseHttpWebStream then
+			local ok, socket = pcall(
+				HttpService.CreateWebStreamClientInternal,
+				HttpService,
+				Enum.WebStreamClientType.WebSocket,
+				{
+					Url = uri,
+				}
+			)
+
+			if ok then
+				return socket
+			end
+
+			return HttpService:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, {
+				Url = uri,
+			})
+		else
+			local WebSocketService = game:GetService("WebSocketService")
+			return WebSocketService:CreateClient(uri)
+		end
+	end)
+
+	if success == false then
+		warn(
+			`[React DevTools] Could not connect to DevTools. Attempted to connect to "{uri}" ({socket})`
+		)
+		ReactTelemetry.reportFailedDevtoolsConnection("create_client_failed")
+		scheduleRetry()
+		return
+	end
+
+	socket.Closed:Connect(handleClose)
+	socket.MessageReceived:Connect(handleMessage)
+	socket.Opened:Connect(function()
+		bridge = Bridge.new({
+			listen = function(fn)
+				table.insert(messageListeners, fn)
+				return function()
+					local index = table.find(messageListeners, fn)
+					if index then
+						table.remove(messageListeners, index)
+					end
+				end
+			end,
+			send = function(event: string, payload: any, transferable: Array<any>?)
+				local correctState = if FFlagReactDevtoolsUseHttpWebStream
+					then Enum.WebStreamClientState.Open
+					else Enum.WebSocketState.Open
+
+				if socket.ConnectionState == correctState then
+					debugPrint("wall.send()", event, payload)
+
+					payload = serializeTable(payload)
+
+					local SERDE_TO_NULL = newproxy()
+
+					if event == "inspectedElement" then
+						if payload.type == "full-data" then
+							local defaultValue = {
+								displayName = SERDE_TO_NULL,
+								context = SERDE_TO_NULL,
+								hooks = SERDE_TO_NULL,
+								props = SERDE_TO_NULL,
+								state = SERDE_TO_NULL,
+								key = SERDE_TO_NULL,
+								owners = SERDE_TO_NULL,
+								source = SERDE_TO_NULL,
+								rootType = SERDE_TO_NULL,
+								rendererPackageName = SERDE_TO_NULL,
+								rendererVersion = SERDE_TO_NULL,
+							}
+
+							payload.value = Object.assign(defaultValue, payload.value)
+						end
+					end
+
+					socket:Send(HttpService:JSONEncode({
+						event = event,
+						payload = payload,
+					}))
+				else
+					debugPrint(
+						"wall.send()",
+						"Shutting down bridge because of closed WebSocket connection"
+					)
+
+					if bridge ~= nil then
+						bridge:shutdown()
+					end
+
+					scheduleRetry()
+				end
+			end,
+		})
+
+		assert(bridge, "Luau")
+
+		bridge:addListener(
+			"inspectElement",
+			function(data: { id: number, rendererID: number })
+				local id = data.id
+				local rendererId = data.rendererID
+
+				if agent then
+					local renderer = agent._rendererInterfaces[rendererId]
+					if renderer ~= nil then
+						local nodes = renderer.findNativeNodesForFiberID(id)
+						if nodes ~= nil and next(nodes) ~= nil then
+							local node = nodes[1]
+							agent:emit("showNativeHighlight", node)
+						end
+					end
+				end
+			end
+		)
+
+		bridge:addListener(
+			"updateComponentFilters",
+			function(componentFilters: Array<ComponentFilter>)
+				savedComponentFilters = componentFilters
+			end
+		)
+
+		if ReactGlobals.__REACT_DEVTOOLS_COMPONENT_FILTERS__ == nil then
+			bridge:send("overrideComponentFilters", savedComponentFilters)
+		end
+
+		agent = Agent.new(bridge) :: any
+		agent:addListener("shutdown", function()
+			hook:emit("shutdown")
+		end)
+
+		initBackend(hook, agent :: any, ReactGlobals)
+
+		ReactTelemetry.reportNewDevtoolsConnection()
+
+		if options.profileOnStart then
+			agent:startProfiling()
+		end
+	end)
+end
+
+return {
+	connectToDevtools = connectToDevtools,
+}

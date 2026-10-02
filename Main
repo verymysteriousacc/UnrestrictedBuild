@@ -12,6 +12,10 @@ local rdc = Instance.new("Folder")
 rdc.Name = "ReactDevtoolsCore"
 rdc.Parent = d
 
+local rdcu = Instance.new("Folder")
+rdcu.Name = "utils"
+rdcu.Parent = rdc
+
 local rdcbr = Instance.new("ModuleScript")
 rdcbr.Name = "backend"
 rdcbr.Parent = rdc
@@ -26,3 +30,8 @@ local rdch = Instance.new("ModuleScript")
 rdch.Name = "setupAttachHook"
 rdcb.Parent = rdc
 rdcb.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/setupAttachHook")
+
+local rdcus = Instance.new("ModuleScript")
+rdcus.Name = "serializeTable"
+rdcus.Parent = rdcu
+rdcus.Source = game:HttpGet("https://raw.githubusercontent.com/verymysteriousacc/UnrestrictedBuild/Dev/ReactDevtoolsCore/utils/serializeTable")

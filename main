@@ -1,7 +1,7 @@
 local cp = game:GetService("CorePackages")
 
 local f = Instance.new("Folder")
-f.Name = "Build@TEST1"
+f.Name = "PackagesMain"
 f.Parent = cp
 
 local d = Instance.new("Folder")
